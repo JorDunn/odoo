@@ -2408,7 +2408,7 @@ class TestStockValuation(TestStockValuationBase):
         move2.picked = True
         move2._action_done()
 
-        self.assertAlmostEqual(self.product1.standard_price, 16.67)
+        self.assertAlmostEqual(self.product1.standard_price, 16.6666667)
         self.assertAlmostEqual(move2.stock_valuation_layer_ids.value, 200)
         self.assertAlmostEqual(self.product1.quantity_svl, 15)
         self.assertAlmostEqual(self.product1.value_svl, 250)
@@ -3091,14 +3091,14 @@ class TestStockValuation(TestStockValuationBase):
         self.assertRecordValues(
             amls,
             [
-                {'account_id': self.stock_input_account.id, 'debit': 240, 'credit': 0},
-                {'account_id': self.stock_valuation_account.id, 'debit': 0, 'credit': 240},
-                {'account_id': self.stock_valuation_account.id, 'debit': 239.97, 'credit': 0},
-                {'account_id': self.stock_input_account.id, 'debit': 0, 'credit': 239.97},
+                {'account_id': self.stock_input_account.id, 'debit': 240.0, 'credit': 0},
+                {'account_id': self.stock_valuation_account.id, 'debit': 0, 'credit': 240.0},
+                {'account_id': self.stock_valuation_account.id, 'debit': 240.0, 'credit': 0},
+                {'account_id': self.stock_input_account.id, 'debit': 0, 'credit': 240.0},
             ]
         )
 
-        self.assertEqual(self.product1.standard_price, 12.63)
+        self.assertAlmostEqual(self.product1.standard_price, 12.63157895)
 
     def test_change_cost_method_2(self):
         """ Change the cost method from FIFO to standard.
@@ -3176,12 +3176,12 @@ class TestStockValuation(TestStockValuationBase):
             [
                 {'account_id': self.stock_input_account.id, 'debit': 240, 'credit': 0},
                 {'account_id': self.stock_valuation_account.id, 'debit': 0, 'credit': 240},
-                {'account_id': self.stock_valuation_account.id, 'debit': 239.97, 'credit': 0},
-                {'account_id': self.stock_input_account.id, 'debit': 0, 'credit': 239.97},
+                {'account_id': self.stock_valuation_account.id, 'debit': 240.0, 'credit': 0},
+                {'account_id': self.stock_input_account.id, 'debit': 0, 'credit': 240.0},
             ]
         )
 
-        self.assertEqual(self.product1.standard_price, 12.63)
+        self.assertAlmostEqual(self.product1.standard_price, 12.63157895)
 
     def test_fifo_sublocation_valuation_1(self):
         """ Set the main stock as a view location. Receive 2 units of a
@@ -4420,3 +4420,49 @@ class TestStockValuation(TestStockValuationBase):
         self.assertEqual(delivery.move_ids.product_qty, 0.01)
         self.assertEqual(delivery.move_ids.stock_valuation_layer_ids.quantity, -0.01)
         self.assertEqual(self.product1.qty_available, 0.00)
+
+    def test_transit_move_does_not_change_valuation(self):
+        category = self.env['product.category'].create({
+            'name': 'Test Category',
+            'property_cost_method': 'fifo',
+            'property_valuation': 'real_time',
+        })
+        product = self.env['product.product'].create({
+            'name': 'Transit Valuation Product',
+            'is_storable': True,
+            'categ_id': category.id,
+        })
+        transit_location = self.env['stock.location'].create({
+            'name': 'Test Transit Location',
+            'usage': 'transit',
+        })
+
+        self._make_in_move(product, 100, unit_cost=10)
+        self._make_out_move(product, 10)
+
+        initial_value = product.total_value
+        self.assertEqual(initial_value, 900)
+        self.assertEqual(product.qty_available, 90)
+
+        move_internal = self.env['stock.move'].create({
+            'name': 'Stock → Transit',
+            'product_id': product.id,
+            'product_uom_qty': 20,
+            'product_uom': product.uom_id.id,
+            'location_id': self.env.ref('stock.stock_location_stock').id,
+            'location_dest_id': transit_location.id,
+        })
+        move_internal._action_confirm()
+        move_internal._action_assign()
+        move_internal.move_line_ids.quantity = 20
+        move_internal.picked = True
+        move_internal._action_done()
+
+        self.assertEqual(product.qty_available, 70)
+        product._compute_value_svl()
+
+        self.assertEqual(
+            product.total_value,
+            initial_value,
+            "Valuation should not change when moving to transit location"
+        )
